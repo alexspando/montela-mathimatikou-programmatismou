@@ -1,0 +1,4 @@
+Charge_category,duration,min_level,max_level
+base,1,0,7086
+mid,0.79908675799,7086,9004
+rush,0.17123287671,9004,11169
