@@ -19,7 +19,7 @@ All implementations are written in **Julia** using **JuMP** and **GLPK**, and pr
 
 ---
 
-## Repository Structure 
+## Repository Structure (suggested)
 
 ```text
 .
@@ -37,64 +37,3 @@ All implementations are written in **Julia** using **JuMP** and **GLPK**, and pr
 │   ├── lshaped_results.csv
 │   └── lshaped_multicut_results.csv
 └── README.md
-Requirements
-
-Julia ≥ 1.8
-
-Packages:
-
-JuMP
-
-GLPK
-
-CSV
-
-DataFrames
-
-Printf
-
-Install dependencies:
-
-using Pkg
-Pkg.add(["JuMP", "GLPK", "CSV", "DataFrames"])
-
-Data Files
-
-The code expects the following input files:
-
-data/technology.csv
-Contains technology names, marginal costs, and investment costs.
-
-data/needs.csv
-Contains the load-duration curve slicing (durations and load levels).
-
-Make sure the CSV header names match those referenced in the Julia scripts.
-
-How to Run
-
-Clone the repository:
-
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
-
-
-Run each method from Julia (examples):
-
-Benders Decomposition
-include("code/benders.jl")
-
-
-Outputs:
-
-results/benders_results.csv (iteration log and convergence)
-
-L-shaped Method
-include("code/lshaped.jl")
-
-
-Outputs:
-
-results/lshaped_results.csv
-
-Multi-cut L-shaped Method
-include("code/lshaped_multicut.jl")
