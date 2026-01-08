@@ -1,8 +1,5 @@
 ###############################################################
 # BENDERS DECOMPOSITION FOR POWER SYSTEM EXPANSION PLANNING
-# (με LOL μέσα στον περιορισμό ζήτησης)
-#
-# - Slave ΠΑΝΤΑ εφικτό → χρησιμοποιούμε μόνο optimality cuts
 # - Εκτυπώνει ανά iteration: x, Q(x), LB, UB, gap, duals
 # - Γράφει results σε benders_results.csv
 ###############################################################
@@ -21,7 +18,7 @@ function run_benders()
     # Load Needs Data (Slices)   #
     ##############################
     needs = CSV.read("needs.csv", DataFrame)
-    # καθάρισμα ονομάτων στηλών (π.χ. " duration" -> "duration")
+    
     rename!(needs, Symbol.(strip.(String.(names(needs)))))
 
     println("\nNeeds:")
@@ -61,11 +58,8 @@ function run_benders()
     println("I  = ", I)
     println("Technologies = ", names_tech)
 
-    #######################################
-    # Parameter: Value of Lost Load (VOLL)
-    #######################################
-    V = 1000.0  # €/MWh (άλλαξέ το αν θες)
 
+    V = 1000.0  # €/MWh 
     #############################################################
     # MASTER PROBLEM (Investment problem with θ & Benders cuts)
     #############################################################
@@ -84,8 +78,7 @@ function run_benders()
     LB = -Inf
     UB = +Inf
 
-    # Για ωραίο table: στήλες για κάθε τεχνολογία με το όνομά της
-    res = DataFrame()
+
     res.iter = Int[]
     for nm in names_tech
         res[!, Symbol(nm)] = Float64[]

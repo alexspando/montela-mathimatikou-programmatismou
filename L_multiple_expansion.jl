@@ -153,7 +153,7 @@ for k in 1:max_iters
     println("[Master] LB = ", LB)
 
     #########################
-    # 2. Solve ALL SLAVES => scenario cuts
+    # 2. Solve ALL SLAVES 
     #########################
     Qω_vals = zeros(Ω)
     Qbar = 0.0

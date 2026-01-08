@@ -1,6 +1,5 @@
 ###############################################################
 # L-SHAPED METHOD FOR STOCHASTIC SYSTEM EXPANSION (LP)
-# Output stored in CSV with decision evolution per iteration
 ###############################################################
 
 using JuMP
@@ -23,13 +22,11 @@ MC = Float64.(tech.cost)
 I  = Float64.(tech.initial_investment)
 n = length(names)
 
-#######################################
-# Parameter: Value of Lost Load (VOLL)
-#######################################
+
 V = 1000.0
 
 #######################################
-# Scenarios from Table 7 (2 scenarios)
+# Scenarios 
 #######################################
 T = [1.0, 0.79908675799, 0.17123287671]  # durations (not stochastic)
 m = length(T)
@@ -153,7 +150,7 @@ for k in 1:max_iters
     println("[Master] LB = ", LB)
 
     #########################
-    # 2. Solve ALL SLAVES => Expected recourse + aggregated cut
+    # 2. Solve ALL SLAVES 
     #########################
     Qω_vals = zeros(Ω)
     Qbar = 0.0
@@ -232,7 +229,7 @@ println("θ* = ", value(θ))
 println("\nResults saved to lshaped_results.csv.")
 
 #############################################################
-# Display from CSV (as you asked)
+# Display from CSV
 #############################################################
 println("\n=== DISPLAYING OUTPUT FROM CSV ===")
 df = CSV.read("lshaped_results.csv", DataFrame)
