@@ -20,10 +20,7 @@ MC = Float64.(tech.cost)
 I  = Float64.(tech.initial_investment)
 n = length(names)
 
-#######################################
-# Parameter: Value of Lost Load (VOLL)
-#######################################
-V = 1000
+V = 1000.0
 
 T = [1.0, 0.79908675799, 0.17123287671]  # durations (not stochastic)
 m = length(T)

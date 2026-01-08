@@ -1,6 +1,10 @@
 ###############################################################
-# L-SHAPED METHOD FOR STOCHASTIC SYSTEM EXPANSION (LP)
-# Output stored in CSV with decision evolution per iteration
+# BENDERS DECOMPOSITION FOR POWER SYSTEM EXPANSION PLANNING
+# (με LOL μέσα στον περιορισμό ζήτησης)
+#
+# - Slave ΠΑΝΤΑ εφικτό → χρησιμοποιούμε μόνο optimality cuts
+# - Εκτυπώνει ανά iteration: x, Q(x), LB, UB, gap, duals
+# - Γράφει results σε benders_results.csv
 ###############################################################
 
 using JuMP
@@ -8,241 +12,232 @@ using GLPK
 using CSV
 using DataFrames
 using Printf
+import MathOptInterface as MOI
 
-println("=== LOADING INPUT DATA ===")
+function run_benders()
+    println("=== LOADING INPUT DATA ===")
 
-#######################################
-# Load Technologies (MC and Inv cost) #
-#######################################
-tech = CSV.read("technology.csv", DataFrame)
-println("\nTechnologies:")
-println(tech)
+    ##############################
+    # Load Needs Data (Slices)   #
+    ##############################
+    needs = CSV.read("needs.csv", DataFrame)
+    # καθάρισμα ονομάτων στηλών (π.χ. " duration" -> "duration")
+    rename!(needs, Symbol.(strip.(String.(names(needs)))))
 
-names = String.(tech.technology)
-MC = Float64.(tech.cost)
-I  = Float64.(tech.initial_investment)
-n = length(names)
+    println("\nNeeds:")
+    println(needs)
 
-#######################################
-# Parameter: Value of Lost Load (VOLL)
-#######################################
-V = 1000.0
+    # ΠΑΝΤΑ με θέση στήλης (για αποφυγή BOM / Unicode προβλημάτων)
+    categories = needs[!, 1]
+    T          = Float64.(needs[!, 2])
+    minL       = Float64.(needs[!, 3])
+    maxL       = Float64.(needs[!, 4])
 
-#######################################
-# Scenarios from Table 7 (2 scenarios)
-#######################################
-T = [8760.0, 7000.0, 1500.0]  # durations (not stochastic)
-m = length(T)
 
-P = [0.10, 0.90]              # probabilities
-Ω = length(P)
+    m = length(categories)
 
-# ΔD[j, ω] = max-min (width of slice j in scenario ω)
-ΔD = [
-    7086.0  3919.0;  # base
-    1918.0  3410.0;  # medium
-    2165.0  2986.0   # peak
-]  # size m x Ω
+    # ΔD_j = max_level - min_level
+    ΔD = [maxL[j] - minL[j] for j in 1:m]
+    println("\nT (hours per slice) = ", T)
+    println("ΔD per slice = ", ΔD)
 
-println("\nScenario probabilities P = ", P)
-println("ΔD per (slice j, scenario ω):")
-for ω in 1:Ω
-    println("  ω=$ω  ΔD = ", ΔD[:, ω])
-end
+    #######################################
+    # Load Technologies (MC and Inv cost) #
+    #######################################
+    tech = CSV.read("technology.csv", DataFrame)
+    rename!(tech, Symbol.(strip.(String.(names(tech)))))
 
-#############################################################
-# MASTER PROBLEM
-#############################################################
-master = Model(GLPK.Optimizer)
+    println("\nTechnologies:")
+    println(tech)
 
-@variable(master, x[1:n] >= 0)   # investment in MW
-@variable(master, θ >= 0)
+    ## Διάβασμα με θέση στήλης (robust σε BOM/hidden chars)
+    names_tech = String.(tech[!, 1])      # technology
+    MC         = Float64.(tech[!, 2])     # cost
+    I          = Float64.(tech[!, 3])     # initial_investment
 
-@objective(master, Min, sum(I[i] * x[i] for i in 1:n) + θ)
+    n = length(names_tech)
 
-cuts = Vector{ConstraintRef}()
+    println("\nMC = ", MC)
+    println("I  = ", I)
+    println("Technologies = ", names_tech)
 
-#############################################################
-# SLAVE SOLVER FOR ONE SCENARIO ω
-#############################################################
-function solve_slave_one_scenario(xk::Vector{Float64}, ω::Int,
-                                  MC::Vector{Float64}, T::Vector{Float64},
-                                  V::Float64, ΔD::Matrix{Float64})
-    n = length(MC)
-    m = length(T)
+    #######################################
+    # Parameter: Value of Lost Load (VOLL)
+    #######################################
+    V = 1000.0  # €/MWh (άλλαξέ το αν θες)
 
-    sub = Model(GLPK.Optimizer)
-    set_silent(sub)
+    #############################################################
+    # MASTER PROBLEM (Investment problem with θ & Benders cuts)
+    #############################################################
+    master = Model(GLPK.Optimizer)
 
-    @variable(sub, p[1:n, 1:m] >= 0)
-    @variable(sub, lol[1:m] >= 0)
+    @variable(master, x[1:n] >= 0)   # investments (MW)
+    @variable(master, θ >= 0)
 
-    @objective(sub, Min,
-        sum(MC[i] * T[j] * p[i, j] for i in 1:n, j in 1:m) +
-        sum(V     * T[j] * lol[j]  for j in 1:m)
-    )
+    @objective(master, Min, sum(I[i] * x[i] for i in 1:n) + θ)
 
-    @constraint(sub, demand[j=1:m],
-        sum(p[i, j] for i in 1:n) + lol[j] == ΔD[j, ω]
-    )
+    println("\n=== STARTING BENDERS ITERATIONS ===")
 
-    @constraint(sub, cap[i=1:n],
-        sum(p[i, j] for j in 1:m) <= xk[i]
-    )
+    max_iters = 50
+    tol = 1e-3
 
-    optimize!(sub)
-    if termination_status(sub) != MOI.OPTIMAL
-        error("Slave not optimal for scenario ω=$ω (should not happen with LOL).")
+    LB = -Inf
+    UB = +Inf
+
+    # Για ωραίο table: στήλες για κάθε τεχνολογία με το όνομά της
+    res = DataFrame()
+    res.iter = Int[]
+    for nm in names_tech
+        res[!, Symbol(nm)] = Float64[]
     end
+    res.Q = Float64[]
+    res.LB = Float64[]
+    res.UB = Float64[]
+    res.gap = Float64[]
+    res.cut_type = String[]
 
-    Qω = objective_value(sub)
-    λω = dual.(demand)
-    ρω = dual.(cap)
+    #############################################################
+    # MAIN LOOP
+    #############################################################
+    for k in 1:max_iters
+        println("\n---------------------------")
+        println("Iteration $k")
+        println("---------------------------")
 
-    return Qω, λω, ρω
-end
-
-#############################################################
-# RESULTS TABLE (decision evolution)
-#############################################################
-# We build it dynamically so the CSV has real tech names.
-results = DataFrame()
-results.iter = Int[]
-for nm in names
-    results[!, Symbol(nm)] = Float64[]   # x per tech
-end
-results.θ = Float64[]
-results.investment_cost = Float64[]
-
-# scenario-wise recourse costs
-for ω in 1:Ω
-    results[!, Symbol("Q_ω$(ω)")] = Float64[]
-end
-
-results.EQ = Float64[]   # expected recourse
-results.LB = Float64[]
-results.UB = Float64[]
-results.gap = Float64[]
-results.cut_type = String[]
-
-#############################################################
-# MAIN L-SHAPED LOOP
-#############################################################
-println("\n=== STARTING L-SHAPED ITERATIONS ===")
-
-max_iters = 50
-UB = +Inf
-LB = -Inf
-
-for k in 1:max_iters
-    println("\n---------------------------")
-    println("Iteration $k")
-    println("---------------------------")
-
-    #########################
-    # 1. Solve MASTER
-    #########################
-    optimize!(master)
-    if termination_status(master) != MOI.OPTIMAL
-        println("Master not optimal. Stopping.")
-        break
-    end
-
-    xk = value.(x)
-    θk = value(θ)
-    investment_cost = sum(I[i] * xk[i] for i in 1:n)
-    LB = objective_value(master)
-
-    println("[Master] x = ", xk)
-    println("[Master] Investment cost = ", investment_cost)
-    println("[Master] θ = ", θk)
-    println("[Master] LB = ", LB)
-
-    #########################
-    # 2. Solve ALL SLAVES => Expected recourse + aggregated cut
-    #########################
-    Qω_vals = zeros(Ω)
-    Qbar = 0.0
-    α = 0.0
-    β = zeros(n)
-
-    for ω in 1:Ω
-        Qω, λω, ρω = solve_slave_one_scenario(xk, ω, MC, T, V, ΔD)
-
-        Qω_vals[ω] = Qω
-        Qbar += P[ω] * Qω
-
-        α += P[ω] * sum(λω[j] * ΔD[j, ω] for j in 1:m)
-        for i in 1:n
-            β[i] += P[ω] * ρω[i]
+        #########################
+        # 1) Solve MASTER
+        #########################
+        optimize!(master)
+        mst_status = termination_status(master)
+        if mst_status != MOI.OPTIMAL
+            println("Master not optimal. status = $mst_status. Stopping.")
+            break
         end
+
+        xk = value.(x)
+        θk = value(θ)
+        invest_cost = sum(I[i] * xk[i] for i in 1:n)
+
+        @printf("[Master] obj = %.6e\n", objective_value(master))
+        @printf("[Master] θ   = %.6e\n", θk)
+        @printf("[Master] Inv = %.6e\n", invest_cost)
+        println("[Master] x (MW):")
+        for i in 1:n
+            @printf("  %-10s : %.4f\n", names_tech[i], xk[i])
+        end
+
+        LB = objective_value(master)
+
+        #########################
+        # 2) Solve SLAVE
+        #########################
+        sub = Model(GLPK.Optimizer)
+
+        @variable(sub, p[1:n, 1:m] >= 0)   # dispatch (MW)
+        @variable(sub, lol[1:m] >= 0)      # unserved (MW)
+
+        @objective(sub, Min,
+            sum(MC[i] * T[j] * p[i,j] for i in 1:n, j in 1:m) +
+            sum(V      * T[j] * lol[j] for j in 1:m)
+        )
+
+        # Demand with LOL (always feasible)
+        @constraint(sub, demand[j=1:m],
+            sum(p[i,j] for i in 1:n) + lol[j] == ΔD[j]
+        )
+
+        # Capacity limits coupled with xk
+        @constraint(sub, cap[i=1:n],
+            sum(p[i,j] for j in 1:m) <= xk[i]
+        )
+
+        optimize!(sub)
+        sub_status = termination_status(sub)
+
+        if sub_status == MOI.INFEASIBLE
+            # Με lol ΔΕΝ θα συμβεί, αλλά το αφήνουμε για “θεωρητική” πληρότητα.
+            println("[Slave] INFEASIBLE (unexpected with LOL). Adding a simple feasibility cut.")
+            # Χοντρικό feasibility cut (δεν θα ενεργοποιηθεί με lol)
+            @constraint(master, sum(x[i] for i in 1:n) >= maximum(ΔD))
+            # γράψιμο γραμμής στο results
+            push!(res.iter, k)
+            for i in 1:n
+                push!(res[!, Symbol(names_tech[i])], xk[i])
+            end
+            push!(res.Q, NaN)
+            push!(res.LB, LB)
+            push!(res.UB, UB)
+            push!(res.gap, UB - LB)
+            push!(res.cut_type, "feasibility")
+            continue
+        elseif sub_status != MOI.OPTIMAL
+            println("[Slave] status = $sub_status. Stopping.")
+            break
+        end
+
+        Qx = objective_value(sub)
+        @printf("[Slave] Q(x) = %.6e\n", Qx)
+
+        UB = min(UB, invest_cost + Qx)
+        gap = UB - LB
+        @printf("[Bounds] LB = %.6e | UB = %.6e | gap = %.6e\n", LB, UB, gap)
+
+        # Dual multipliers
+        λ = dual.(demand)  # one per slice
+        ρ = dual.(cap)     # one per technology
+
+        println("Dual λ (per slice) = ", λ)
+        println("Dual ρ (per tech)  = ", ρ)
+
+        # Αποθήκευση iteration
+        push!(res.iter, k)
+        for i in 1:n
+            push!(res[!, Symbol(names_tech[i])], xk[i])
+        end
+        push!(res.Q, Qx)
+        push!(res.LB, LB)
+        push!(res.UB, UB)
+        push!(res.gap, gap)
+        push!(res.cut_type, "optimality")
+
+        #########################
+        # Convergence check
+        #########################
+        if abs(gap) <= tol
+            println("\n>>> CONVERGED (gap ≤ $(tol)) <<<")
+            break
+        end
+
+        #########################
+        # 3) Add Benders optimality cut
+        #
+        # θ ≥ Σ_j λ_j ΔD_j + Σ_i ρ_i x_i
+        #
+        # (Τα x_i εδώ είναι μεταβλητές του master, όχι τα xk.)
+        #########################
+        @constraint(master,
+            θ >= sum(λ[j] * ΔD[j] for j in 1:m) +
+                 sum(ρ[i] * x[i]  for i in 1:n)
+        )
+
+        println("Added optimality cut.")
     end
 
-    println("[Slaves] Qω = ", Qω_vals, "   E[Q(x)] = ", Qbar)
-
-    #########################
-    # 3. Update UB and gap
-    #########################
-    UB = min(UB, investment_cost + Qbar)
-    gap = UB - LB
-
-    println("[Bounds] UB = ", UB)
-    println("[Bounds] Gap = ", gap)
-
-    #########################
-    # 4. Store results row
-    #########################
-    row = Dict{Symbol, Any}()
-    row[:iter] = k
-
+    println("\n===== FINAL SOLUTION =====")
+    xstar = value.(x)
+    println("x* (MW):")
     for i in 1:n
-        row[Symbol(names[i])] = xk[i]
+        @printf("  %-10s : %.4f\n", names_tech[i], xstar[i])
     end
+    @printf("θ* = %.6e\n", value(θ))
+    @printf("Final LB = %.6e | Final UB = %.6e | gap = %.6e\n", LB, UB, UB - LB)
 
-    row[:θ] = θk
-    row[:investment_cost] = investment_cost
+    println("\nResults table:")
+    println(res)
 
-    for ω in 1:Ω
-        row[Symbol("Q_ω$(ω)")] = Qω_vals[ω]
-    end
-
-    row[:EQ] = Qbar
-    row[:LB] = LB
-    row[:UB] = UB
-    row[:gap] = gap
-    row[:cut_type] = "optimality"
-
-    push!(results, row)
-
-    # Optional: write CSV each iteration (so you can watch it live)
-    CSV.write("lshaped_results.csv", results)
-
-    #########################
-    # 5. Convergence check
-    #########################
-    if abs(gap) < 1e-3
-        println("\n>>> CONVERGED <<<")
-        break
-    end
-
-    #########################
-    # 6. Add NEW L-SHAPED CUT
-    #########################
-    cut = @constraint(master,
-        θ >= α + sum(β[i] * x[i] for i in 1:n)
-    )
-    push!(cuts, cut)
-    println("Added aggregated optimality cut.")
+    CSV.write("benders_results.csv", res)
+    println("\nSaved: benders_results.csv")
 end
 
-println("\n===== FINAL SOLUTION =====")
-println("x* = ", value.(x))
-println("θ* = ", value(θ))
-println("\nResults saved to lshaped_results.csv.")
-
-#############################################################
-# Display from CSV (as you asked)
-#############################################################
-println("\n=== DISPLAYING OUTPUT FROM CSV ===")
-df = CSV.read("lshaped_results.csv", DataFrame)
-println(df)
+# Run when you include the file
+run_benders()
