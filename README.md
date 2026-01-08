@@ -23,7 +23,6 @@ All implementations are written in **Julia** using **JuMP** and **GLPK**, and pr
 
 ```text
 .
-├── report.tex
 ├── report.pdf
 ├── code/
 │   ├── benders.jl
