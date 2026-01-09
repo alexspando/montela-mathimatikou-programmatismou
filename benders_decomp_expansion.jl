@@ -1,7 +1,5 @@
 ###############################################################
 # BENDERS DECOMPOSITION FOR POWER SYSTEM EXPANSION PLANNING
-# - Εκτυπώνει ανά iteration: x, Q(x), LB, UB, gap, duals
-# - Γράφει results σε benders_results.csv
 ###############################################################
 
 using JuMP
@@ -19,12 +17,9 @@ function run_benders()
     ##############################
     needs = CSV.read("needs.csv", DataFrame)
     
-    #rename!(needs, Symbol.(strip.(String.(names(needs)))))
-
     println("\nNeeds:")
     println(needs)
 
-    # ΠΑΝΤΑ με θέση στήλης (για αποφυγή BOM / Unicode προβλημάτων)
     categories = needs[!, 1]
     T          = Float64.(needs[!, 2])
     minL       = Float64.(needs[!, 3])
@@ -42,7 +37,6 @@ function run_benders()
     # Load Technologies (MC and Inv cost) #
     #######################################
     tech = CSV.read("technology.csv", DataFrame)
-    #rename!(tech, Symbol.(strip.(String.(names(tech)))))
 
     println("\nTechnologies:")
     println(tech)
@@ -148,11 +142,8 @@ function run_benders()
         sub_status = termination_status(sub)
 
         if sub_status == MOI.INFEASIBLE
-            # Με lol ΔΕΝ θα συμβεί, αλλά το αφήνουμε για “θεωρητική” πληρότητα.
             println("[Slave] INFEASIBLE (unexpected with LOL). Adding a simple feasibility cut.")
-            # Χοντρικό feasibility cut (δεν θα ενεργοποιηθεί με lol)
             @constraint(master, sum(x[i] for i in 1:n) >= maximum(ΔD))
-            # γράψιμο γραμμής στο results
             push!(res.iter, k)
             for i in 1:n
                 push!(res[!, Symbol(names_tech[i])], xk[i])
