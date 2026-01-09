@@ -203,7 +203,7 @@ for k in 1:max_iters
     row[:LB] = LB
     row[:UB] = UB
     row[:gap] = gap
-    row[:cut_type] = "optimality_multi_cut"
+    row[:cut_type] = "optimality"
 
     push!(results, row)
     CSV.write("lshaped_multicut_results.csv", results)

@@ -89,7 +89,7 @@ function solve_slave_one_scenario(xk::Vector{Float64}, ω::Int,
 
     optimize!(sub)
     if termination_status(sub) != MOI.OPTIMAL
-        error("Slave not optimal for scenario ω=$ω (should not happen with LOL).")
+        error("Slave not optimal for scenario ω=$ω.")
     end
 
     Qω = objective_value(sub)
@@ -102,7 +102,6 @@ end
 #############################################################
 # RESULTS TABLE (decision evolution)
 #############################################################
-# We build it dynamically so the CSV has real tech names.
 results = DataFrame()
 results.iter = Int[]
 for nm in names

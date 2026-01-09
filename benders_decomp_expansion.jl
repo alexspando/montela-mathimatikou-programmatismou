@@ -19,7 +19,7 @@ function run_benders()
     ##############################
     needs = CSV.read("needs.csv", DataFrame)
     
-    rename!(needs, Symbol.(strip.(String.(names(needs)))))
+    #rename!(needs, Symbol.(strip.(String.(names(needs)))))
 
     println("\nNeeds:")
     println(needs)
@@ -42,7 +42,7 @@ function run_benders()
     # Load Technologies (MC and Inv cost) #
     #######################################
     tech = CSV.read("technology.csv", DataFrame)
-    rename!(tech, Symbol.(strip.(String.(names(tech)))))
+    #rename!(tech, Symbol.(strip.(String.(names(tech)))))
 
     println("\nTechnologies:")
     println(tech)
@@ -78,7 +78,7 @@ function run_benders()
     LB = -Inf
     UB = +Inf
 
-
+    res = DataFrame()
     res.iter = Int[]
     for nm in names_tech
         res[!, Symbol(nm)] = Float64[]
